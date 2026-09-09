@@ -45,6 +45,24 @@ class TrayApp : Application() {
             var connectedBaud: Int? = null
             var shutdownTriggered = false
 
+            // last values pushed to the tray - used to skip redundant updates,
+            // otherwise re-setting the same icon every poll makes it flicker.
+            var lastIconKey: Pair<Int, TrayIconRenderer.Mode>? = null
+            var lastTooltip: String? = null
+
+            fun pushToTray(iconPercent: Int, mode: TrayIconRenderer.Mode, tooltip: String) {
+                val iconKey = iconPercent to mode
+                val iconChanged = iconKey != lastIconKey
+                val tooltipChanged = tooltip != lastTooltip
+                if (!iconChanged && !tooltipChanged) return
+                lastIconKey = iconKey
+                lastTooltip = tooltip
+                Platform.runLater {
+                    if (iconChanged) trayIcon.setGraphic(TrayIconRenderer.render(iconPercent, mode))
+                    if (tooltipChanged) trayIcon.setTrayIconTooltip(tooltip)
+                }
+            }
+
             while (running) {
                 val settings = SettingsHolder.current
                 try {
@@ -73,18 +91,19 @@ class TrayApp : Application() {
                         null
                     }
 
-                    Platform.runLater {
-                        trayIcon.setGraphic(TrayIconRenderer.render(status.capacityPercent.roundToInt(), mode))
-                        val state = if (status.onBattery) "на батарее" else "от сети"
-                        val eta = when {
-                            !status.onBattery -> ""
-                            etaSeconds == null -> ", оценка времени..."
-                            etaSeconds == 0L -> ", порог достигнут"
-                            etaSeconds < 60L -> ", менее минуты до порога"
-                            else -> ", ~${formatEta(etaSeconds)} до порога"
-                        }
-                        trayIcon.setTrayIconTooltip("UPS: ${status.capacityPercent}% ($state)$eta")
+                    val state = if (status.onBattery) "на батарее" else "от сети"
+                    val eta = when {
+                        !status.onBattery -> ""
+                        etaSeconds == null -> ", оценка времени..."
+                        etaSeconds == 0L -> ", порог достигнут"
+                        etaSeconds < 60L -> ", менее минуты до порога"
+                        else -> ", ~${formatEta(etaSeconds)} до порога"
                     }
+                    pushToTray(
+                        status.capacityPercent.roundToInt(),
+                        mode,
+                        "UPS: ${status.capacityPercent}% ($state)$eta"
+                    )
 
                     if (critical) {
                         if (!shutdownTriggered) {
@@ -99,10 +118,7 @@ class TrayApp : Application() {
                     client.disconnect()
                     connectedPort = null
                     connectedBaud = null
-                    Platform.runLater {
-                        trayIcon.setGraphic(TrayIconRenderer.render(0, TrayIconRenderer.Mode.ERROR))
-                        trayIcon.setTrayIconTooltip("UPS: нет связи (${e.javaClass.simpleName})")
-                    }
+                    pushToTray(0, TrayIconRenderer.Mode.ERROR, "UPS: нет связи (${e.javaClass.simpleName})")
                 }
 
                 Thread.sleep(settings.pollIntervalSeconds.coerceAtLeast(1) * 1000L)
