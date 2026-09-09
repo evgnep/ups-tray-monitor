@@ -3,3 +3,6 @@ build/
 .idea/
 *.iml
 out/
+
+# generated at runtime next to the app
+settings.properties
